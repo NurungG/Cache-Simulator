@@ -1,6 +1,6 @@
 #include "lru.h"
 
-struct lru_list *lru_init() {
+struct lru_list *lru_init(int max_sz) {
     struct lru_list *list = (struct lru_list *)malloc(sizeof(struct lru_list));
 
     list->size = 0;

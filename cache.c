@@ -29,7 +29,7 @@ int cache_create(struct cache_info *ci, int _capacity, int _n_way, int _block_sz
 
     ci->offset_mask = UINT64_MAX >> ( 64 - ci->b_offset);
     ci->tag_mask    = UINT64_MAX << ( 64 - ci->b_tag);
-    ci->index_mask  = UINT64_MAX & (!ci->offset_mask) & (!(ci->tag_mask));
+    ci->index_mask  = ( UINT64_MAX ^ ci->offset_mask ) & (UINT64_MAX ^ ci->tag_mask);
 
     ci->way = (struct cache_way *)malloc(sizeof(struct cache_way) * ci->n_way);
     ci->set = (struct cache_set *)malloc(sizeof(struct cache_set) * ci->n_set);
@@ -41,7 +41,7 @@ int cache_create(struct cache_info *ci, int _capacity, int _n_way, int _block_sz
     for (int i = 0; i < ci->n_set; i++) {
         ci->set[i].ptr =
                 (struct cache_entry **)malloc(sizeof(struct cache_entry *) * ci->n_way);
-        ci->set[i].lru = lru_init();
+        ci->set[i].lru = lru_init(ci->n_way);
 
         for (int j = ci->n_way-1; j >= 0; j--) {
             ci->set[i].ptr[j] = &ci->way[j].tbl[i];
@@ -62,9 +62,9 @@ int cache_destroy(struct cache_info *ci) {
 
     for (i = 0; i < ci->n_way; i++) {
         for (j = 0; j < ci->n_set; j++) {
-            struct cache_entry *entry = &ci->way[i].tbl[j];
+            struct cache_entry *entry = ci->set[j].ptr[i];
             if (entry->is_valid) {
-                ci->checksum ^= (entry->tag ^ j << 1) | entry->is_dirty;
+                ci->checksum ^= ( ( entry->tag ^ j ) << 1 ) | entry->is_dirty;
             }
         }
     }
@@ -81,8 +81,8 @@ int cache_destroy(struct cache_info *ci) {
 
     printf("Read misses: %lu\n", ci->read_miss);
     printf("Write misses: %lu\n", ci->write_miss);
-    printf("Read miss rate: %f%%\n", (float)ci->read_miss / ci->read_cnt * 100);
-    printf("Write miss rate: %f%%\n", (float)ci->write_miss / ci->write_cnt * 100);
+    printf("Read miss rate: %.2f%%\n", (float)ci->read_miss / ci->read_cnt * 100);
+    printf("Write miss rate: %.2f%%\n", (float)ci->write_miss / ci->write_cnt * 100);
 
     printf("Clean evictions: %lu\n", ci->clean_evict);
     printf("Dirty evictions: %lu\n", ci->dirty_evict);
@@ -144,7 +144,7 @@ int cache_read(uint64_t addr) {
 
             // Write-back
             // target->data => memory
-        } else {
+        } else if (target->is_valid){
             ++cache.clean_evict;
         }
 
@@ -196,7 +196,7 @@ int cache_write(uint64_t addr) {
 
             // Write-back
             // target->data => memory
-        } else {
+        } else if (target->is_valid) {
             ++cache.clean_evict;
         }
 

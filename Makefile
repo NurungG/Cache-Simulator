@@ -1,6 +1,14 @@
 CC=gcc
 CFLAGS=-Wall -g
-OBJS=main.o cache.o lru.o
+
+TARGET_LRU=lru
+
+ifeq ($(TARGET_LRU), lru)
+ OBJS=main.o cache.o lru.o
+else
+ OBJS=main.o cache.o pseudo_lru.o
+endif
+
 TARGET=simulator
 
 all: $(TARGET)
