@@ -1,79 +1,113 @@
 #include "cache.h"
 
-struct basic_cache cache = {
+struct cache_info cache = {
     .create  = cache_create,
     .destroy = cache_destroy,
     .read    = cache_read,
     .write   = cache_write
 };
 
-int cache_create() {
-    cache.way = (struct cache_way *)malloc(sizeof(struct cache_way) * N_WAY);
-    cache.set = (struct cache_set *)malloc(sizeof(struct cache_set) * N_SET);
-
-    for (int i = 0; i < N_WAY; i++) {
-        cache.way[i].tbl =
-                (struct cache_entry *)malloc(sizeof(struct cache_entry) * N_SET);
+static int num_of_bits(int num) {
+    int ret = 0;
+    while ((num = num >> 1)) {
+        ++ret;
     }
-    for (int i = 0; i < N_SET; i++) {
-        cache.set[i].ptr =
-                (struct cache_entry **)malloc(sizeof(struct cache_entry *) * N_WAY);
-        cache.set[i].lru = lru_init();
+    return ret;
+}
 
-        for (int j = N_WAY-1; j >= 0; j--) {
-            cache.set[i].ptr[j] = &cache.way[j].tbl[i];
-            cache.set[i].ptr[j]->is_valid = false;
-            cache.set[i].ptr[j]->lru_ptr =
-                    lru_push(cache.set[i].lru, (void *)cache.set[i].ptr[j]);
+int cache_create(struct cache_info *ci, int _capacity, int _n_way, int _block_sz) {
+    ci->capacity = _capacity * 1024;
+    ci->n_way    = _n_way;
+    ci->block_sz = _block_sz;
+
+    ci->n_entry  = ci->capacity / ci->block_sz;
+    ci->n_set    = ci->n_entry / ci->n_way;
+
+    ci->b_offset = num_of_bits(ci->block_sz);
+    ci->b_index  = num_of_bits(ci->capacity / ci->n_way / ci->block_sz);
+    ci->b_tag    = 64 - ci->b_offset - ci->b_index;
+
+    ci->offset_mask = UINT64_MAX >> ( 64 - ci->b_offset);
+    ci->tag_mask    = UINT64_MAX << ( 64 - ci->b_tag);
+    ci->index_mask  = UINT64_MAX & (!ci->offset_mask) & (!(ci->tag_mask));
+
+    ci->way = (struct cache_way *)malloc(sizeof(struct cache_way) * ci->n_way);
+    ci->set = (struct cache_set *)malloc(sizeof(struct cache_set) * ci->n_set);
+
+    for (int i = 0; i < ci->n_way; i++) {
+        ci->way[i].tbl =
+                (struct cache_entry *)malloc(sizeof(struct cache_entry) * ci->n_set);
+    }
+    for (int i = 0; i < ci->n_set; i++) {
+        ci->set[i].ptr =
+                (struct cache_entry **)malloc(sizeof(struct cache_entry *) * ci->n_way);
+        ci->set[i].lru = lru_init();
+
+        for (int j = ci->n_way-1; j >= 0; j--) {
+            ci->set[i].ptr[j] = &ci->way[j].tbl[i];
+            ci->set[i].ptr[j]->is_valid = false;
+            ci->set[i].ptr[j]->lru_ptr =
+                    lru_push(ci->set[i].lru, (void *)ci->set[i].ptr[j]);
         }
     }
 
     return CA_EXIT_SUCCESS;
 }
 
-int cache_destroy() {
+int cache_destroy(struct cache_info *ci) {
     int i, j;
 
-    cache.total_cnt = cache.read_cnt + cache.write_cnt;
+    // Calculate some info
+    ci->total_cnt = ci->read_cnt + ci->write_cnt;
 
-    for (i = 0; i < N_WAY; i++) {
-        for (j = 0; j < N_SET; j++) {
-            struct cache_entry *entry = &cache.way[i].tbl[j];
+    for (i = 0; i < ci->n_way; i++) {
+        for (j = 0; j < ci->n_set; j++) {
+            struct cache_entry *entry = &ci->way[i].tbl[j];
             if (entry->is_valid) {
-                cache.checksum ^= (entry->tag ^ j << 1) | entry->is_dirty;
+                ci->checksum ^= (entry->tag ^ j << 1) | entry->is_dirty;
             }
         }
     }
+
     // Print info
     puts("-- General Stats --");
-    printf("Capacity: %d\n", 1 << CAPACITY_BITS);
-    printf("Way: %d\n", N_WAY);
-    printf("Block size: %d\n", BLOCK_SIZE);
+    printf("Capacity: %d\n", ci->capacity / 1024);
+    printf("Way: %d\n", ci->n_way);
+    printf("Block size: %d\n", ci->block_sz);
 
-    printf("Total accesses: %lu\n", cache.total_cnt);
-    printf("Read accesses: %lu\n", cache.read_cnt);
-    printf("Write accesses: %lu\n", cache.write_cnt);
+    printf("Total accesses: %lu\n", ci->total_cnt);
+    printf("Read accesses: %lu\n", ci->read_cnt);
+    printf("Write accesses: %lu\n", ci->write_cnt);
 
-    printf("Read misses: %lu\n", cache.read_miss);
-    printf("Write misses: %lu\n", cache.write_miss);
-    printf("Read miss rate: %f%%\n", (float)cache.read_miss / cache.read_cnt * 100);
-    printf("Write miss rate: %f%%\n", (float)cache.write_miss / cache.write_cnt * 100);
+    printf("Read misses: %lu\n", ci->read_miss);
+    printf("Write misses: %lu\n", ci->write_miss);
+    printf("Read miss rate: %f%%\n", (float)ci->read_miss / ci->read_cnt * 100);
+    printf("Write miss rate: %f%%\n", (float)ci->write_miss / ci->write_cnt * 100);
 
-    printf("Clean evictions: %lu\n", cache.clean_evict);
-    printf("Dirty evictions: %lu\n", cache.dirty_evict);
+    printf("Clean evictions: %lu\n", ci->clean_evict);
+    printf("Dirty evictions: %lu\n", ci->dirty_evict);
 
-    printf("Checksum: 0x%lx\n", cache.checksum);
+    printf("Checksum: 0x%lx\n", ci->checksum);
 
-    for (int i = 0; i < N_WAY; i++) {
-        free(cache.way[i].tbl);
+    // Clear
+    for (int i = 0; i < ci->n_way; i++) {
+        free(ci->way[i].tbl);
     }
-    for (int i = 0; i < N_SET; i++) {
-        lru_free(cache.set[i].lru);
+    for (int i = 0; i < ci->n_set; i++) {
+        lru_free(ci->set[i].lru);
     }
-    free(cache.way);
-    free(cache.set);
+    free(ci->way);
+    free(ci->set);
 
     return CA_EXIT_SUCCESS;
+}
+
+static inline uint64_t get_index(uint64_t addr) {
+    return ( ( addr & cache.index_mask ) >> cache.b_offset );
+}
+
+static inline uint64_t get_tag(uint64_t addr) {
+    return ( ( addr & cache.tag_mask ) >> ( 64 - cache.b_tag ) );
 }
 
 int cache_read(uint64_t addr) {
@@ -87,8 +121,8 @@ int cache_read(uint64_t addr) {
 
     ++cache.read_cnt;
 
-    set = &cache.set[INDEX(addr)];
-    tag = TAG(addr);
+    set = &cache.set[get_index(addr)];
+    tag = get_tag(addr);
 
     // Check cache hit or miss
     for (int i = 0; i < N_WAY; i++) {
@@ -139,8 +173,8 @@ int cache_write(uint64_t addr) {
 
     ++cache.write_cnt;
 
-    set = &cache.set[INDEX(addr)];
-    tag = TAG(addr);
+    set = &cache.set[get_index(addr)];
+    tag = get_tag(addr);
 
     // Check cache hit or miss
     for (int i = 0; i < N_WAY; i++) {

@@ -38,11 +38,26 @@ struct cache_set {
     struct lru_list *lru;
 };
 
-struct basic_cache {
+struct cache_info {
     int (*create) ();
     int (*destroy) ();
     int (*read) ();
     int (*write) ();
+
+    int capacity;
+    int n_way;
+    int block_sz;
+
+    int n_entry;
+    int n_set;
+
+    int b_offset;
+    int b_index;
+    int b_tag;
+
+    uint64_t offset_mask;
+    uint64_t tag_mask;
+    uint64_t index_mask;
 
     struct cache_way *way;
     struct cache_set *set;
