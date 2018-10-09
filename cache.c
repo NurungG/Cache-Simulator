@@ -1,10 +1,10 @@
 #include "cache.h"
 
-struct cache_info cache = {
-    create  = cache_create,
-    destroy = cache_destroy,
-    read    = cache_read,
-    write   = cache_write
+struct basic_cache cache = {
+    .create  = cache_create,
+    .destroy = cache_destroy,
+    .read    = cache_read,
+    .write   = cache_write
 };
 
 int cache_create() {
@@ -20,7 +20,7 @@ int cache_create() {
                 (struct cache_entry **)malloc(sizeof(struct cache_entry *) * N_WAY);
         cache.set[i].lru = lru_init();
 
-        for (int j = N_WAY; j >= 0; j--) {
+        for (int j = N_WAY-1; j >= 0; j--) {
             cache.set[i].ptr[j] = &cache.way[j].tbl[i];
             cache.set[i].ptr[j]->is_valid = false;
             cache.set[i].ptr[j]->lru_ptr =
@@ -32,12 +32,43 @@ int cache_create() {
 }
 
 int cache_destroy() {
+    int i, j;
+
+    cache.total_cnt = cache.read_cnt + cache.write_cnt;
+
+    for (i = 0; i < N_WAY; i++) {
+        for (j = 0; j < N_SET; j++) {
+            struct cache_entry *entry = &cache.way[i].tbl[j];
+            if (entry->is_valid) {
+                cache.checksum ^= (entry->tag ^ j << 1) | entry->is_dirty;
+            }
+        }
+    }
+    // Print info
+    puts("-- General Stats --");
+    printf("Capacity: %d\n", 1 << CAPACITY_BITS);
+    printf("Way: %d\n", N_WAY);
+    printf("Block size: %d\n", BLOCK_SIZE);
+
+    printf("Total accesses: %lu\n", cache.total_cnt);
+    printf("Read accesses: %lu\n", cache.read_cnt);
+    printf("Write accesses: %lu\n", cache.write_cnt);
+
+    printf("Read misses: %lu\n", cache.read_miss);
+    printf("Write misses: %lu\n", cache.write_miss);
+    printf("Read miss rate: %f%%\n", (float)cache.read_miss / cache.read_cnt * 100);
+    printf("Write miss rate: %f%%\n", (float)cache.write_miss / cache.write_cnt * 100);
+
+    printf("Clean evictions: %lu\n", cache.clean_evict);
+    printf("Dirty evictions: %lu\n", cache.dirty_evict);
+
+    printf("Checksum: 0x%lx\n", cache.checksum);
+
     for (int i = 0; i < N_WAY; i++) {
-        free(cache.way[i]);
+        free(cache.way[i].tbl);
     }
     for (int i = 0; i < N_SET; i++) {
         lru_free(cache.set[i].lru);
-        free(cache.set[i]);
     }
     free(cache.way);
     free(cache.set);
@@ -50,9 +81,11 @@ int cache_read(uint64_t addr) {
     uint64_t tag;
 
     struct cache_entry *iter;
-    struct cache_entry *victim;
+    struct cache_entry *target;
 
     bool is_hit = false;
+
+    ++cache.read_cnt;
 
     set = &cache.set[INDEX(addr)];
     tag = TAG(addr);
@@ -63,28 +96,34 @@ int cache_read(uint64_t addr) {
 
         if ( iter->is_valid && (tag == iter->tag) ) {
             is_hit = true;
-            victim = iter;
+            target = iter;
             break;
         }
     }
 
     if (!is_hit) {
-        victim = lru_front(set->lru);
-        if (victim->is_valid && victim->is_dirty) {
+        ++cache.read_miss;
+
+        target = lru_get_victim(set->lru);
+        if (target->is_valid && target->is_dirty) {
+            ++cache.dirty_evict;
+
             // Write-back
-            // victim->data => memory
+            // target->data => memory
+        } else {
+            ++cache.clean_evict;
         }
 
         // Read data
-        victim->tag      = tag;
-        victim->is_valid = true;
-        victim->is_dirty = false;
+        target->tag      = tag;
+        target->is_valid = true;
+        target->is_dirty = false;
 
-        // victim->data <= memory
+        // target->data <= memory
     }
 
     // Update
-    lru_update(set->lru, victim->lru_ptr);
+    lru_update(set->lru, target->lru_ptr);
 
     return CA_EXIT_SUCCESS;
 }
@@ -94,9 +133,11 @@ int cache_write(uint64_t addr) {
     uint64_t tag;
 
     struct cache_entry *iter;
-    struct cache_entry *victim;
+    struct cache_entry *target;
 
     bool is_hit = false;
+
+    ++cache.write_cnt;
 
     set = &cache.set[INDEX(addr)];
     tag = TAG(addr);
@@ -107,30 +148,36 @@ int cache_write(uint64_t addr) {
 
         if ( iter->is_valid && (tag == iter->tag) ) {
             is_hit = true;
-            victim = iter;
+            target = iter;
             break;
         }
     }
 
     if (!is_hit) {
-        victim = lru_front(set->lru);
-        if (victim->is_valid && victim->is_dirty) {
-            // Write-back
-            // victim->data => memory
-        }
-        
-        // Read data
-        victim->tag      = tag;
-        victim->is_valid = true;
+        ++cache.write_miss;
 
-        // victim->data <= memory
+        target = lru_get_victim(set->lru);
+        if (target->is_valid && target->is_dirty) {
+            ++cache.dirty_evict;
+
+            // Write-back
+            // target->data => memory
+        } else {
+            ++cache.clean_evict;
+        }
+
+        // Read data
+        target->tag      = tag;
+        target->is_valid = true;
+
+        // target->data <= memory
     }
 
     // Update
-    lru_update(set->lru, victim->lru_ptr);
+    lru_update(set->lru, target->lru_ptr);
 
     // Mark as dirty
-    victim->is_dirty = true;
+    target->is_dirty = true;
 
     return CA_EXIT_SUCCESS;
 }

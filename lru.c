@@ -8,7 +8,7 @@ struct lru_list *lru_init() {
 
     list->head->value = NULL;
     list->head->next  = list->head;
-    list->head->prev  = lsit->head;
+    list->head->prev  = list->head;
 
     return list;
 }
@@ -66,7 +66,11 @@ int lru_update(struct lru_list *list, struct lru_node *pos) {
 
     pos->next = list->head->next;
     pos->prev = list->head;
-    list->head->next = pos;
+
+    pos->next->prev = pos;
+    pos->prev->next = pos;
+
+    return 0;
 }
 
 void *lru_front(struct lru_list *list) {
@@ -75,4 +79,8 @@ void *lru_front(struct lru_list *list) {
 
 void *lru_back(struct lru_list *list) {
    return list->head->prev->value;
+}
+
+void *lru_get_victim(struct lru_list *list) {
+    return lru_back(list);
 }

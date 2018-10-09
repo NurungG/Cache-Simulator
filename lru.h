@@ -7,12 +7,12 @@ struct lru_node {
     void *value;
     struct lru_node *next;
     struct lru_node *prev;
-}
+};
 
-struct lru_lsit {
+struct lru_list {
     int size;
     struct lru_node *head;
-}
+};
 
 
 struct lru_list *lru_init();
@@ -21,6 +21,7 @@ struct lru_node *lru_push(struct lru_list *list, void *value);
 void *lru_pop(struct lru_list *list);
 int lru_update(struct lru_list *list, struct lru_node *pos);
 void *lru_front(struct lru_list *list);
-void *lru_back(struct lru_lsit *list);
+void *lru_back(struct lru_list *list);
+void *lru_get_victim(struct lru_list *list);
 
 #endif

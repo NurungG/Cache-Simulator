@@ -8,16 +8,12 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "./container.h"
 #include "./config.h"
+#include "./lru.h"
 
 
 #define CA_EXIT_SUCCESS 0
 #define CA_EXIT_FAILURE 1
-
-#define OFFSET_MASK ( UINT64_MAX >> ( 64 - B_OFFSET ) )
-#define TAG_MASK    ( UINT64_MAX << ( 64 - B_TAG ) )
-#define INDEX_MASK  ( UINT64_MAX & (!OFFSET MASK) & (!TAG_MASK) )
 
 #define INDEX(x) ( ( x & INDEX_MASK ) >> B_OFFSET )
 #define TAG(x)   ( ( x & TAG_MASK ) >> ( 64 - B_TAG) )
@@ -35,11 +31,39 @@ struct cache_entry {
 
 struct cache_way {
     struct cache_entry *tbl;
-}
+};
 
 struct cache_set {
     struct cache_entry **ptr;
     struct lru_list *lru;
-}
+};
+
+struct basic_cache {
+    int (*create) ();
+    int (*destroy) ();
+    int (*read) ();
+    int (*write) ();
+
+    struct cache_way *way;
+    struct cache_set *set;
+
+    uint64_t total_cnt;
+    uint64_t read_cnt;
+    uint64_t write_cnt;
+
+    uint64_t read_miss;
+    uint64_t write_miss;
+
+    uint64_t clean_evict;
+    uint64_t dirty_evict;
+
+    uint64_t checksum;
+};
+
+
+int cache_create();
+int cache_destroy();
+int cache_read(uint64_t addr);
+int cache_write(uint64_t addr);
 
 #endif
