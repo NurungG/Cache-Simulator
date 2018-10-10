@@ -1,4 +1,4 @@
 trace/
-output/
 *.o
+ping_trace.out
 simulator

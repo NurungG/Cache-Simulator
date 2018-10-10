@@ -2,7 +2,7 @@ CC=gcc
 CFLAGS=-Wall -g
 
 #TARGET_LRU=lru
-TARGET_LRU=pseudo_lru
+#TARGET_LRU=pseudo_lru
 
 ifeq ($(TARGET_LRU), lru)
  OBJS=main.o cache.o lru.o
