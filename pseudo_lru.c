@@ -31,9 +31,8 @@ int lru_free(struct lru_list *list) {
 }
 
 struct lru_node *lru_push(struct lru_list *list, void *value) {
-    list->node_arr[list->max-list->size-1].value = value;
-    list->size++;
-    return &list->node_arr[list->max-list->size-2];
+    list->node_arr[list->size].value = value;
+    return &list->node_arr[list->size++];
 }
 
 int lru_update(struct lru_list *list, struct lru_node *node) {

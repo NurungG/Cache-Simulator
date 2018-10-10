@@ -1,3 +1,4 @@
 trace/
+output/
 *.o
 simulator

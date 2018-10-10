@@ -9,13 +9,14 @@ struct cache_info cache = {
 
 static int num_of_bits(int num) {
     int ret = 0;
-    while ((num = num >> 1)) {
+    while ((num >>= 1)) {
         ++ret;
     }
     return ret;
 }
 
 int cache_create(struct cache_info *ci, int _capacity, int _n_way, int _block_sz) {
+    // Initialize configuration variables
     ci->capacity = _capacity * 1024;
     ci->n_way    = _n_way;
     ci->block_sz = _block_sz;
@@ -31,6 +32,7 @@ int cache_create(struct cache_info *ci, int _capacity, int _n_way, int _block_sz
     ci->tag_mask    = UINT64_MAX << ( 64 - ci->b_tag);
     ci->index_mask  = ( UINT64_MAX ^ ci->offset_mask ) & (UINT64_MAX ^ ci->tag_mask);
 
+    // Allocate cache
     ci->way = (struct cache_way *)malloc(sizeof(struct cache_way) * ci->n_way);
     ci->set = (struct cache_set *)malloc(sizeof(struct cache_set) * ci->n_set);
 
@@ -43,7 +45,8 @@ int cache_create(struct cache_info *ci, int _capacity, int _n_way, int _block_sz
                 (struct cache_entry **)malloc(sizeof(struct cache_entry *) * ci->n_way);
         ci->set[i].lru = lru_init(ci->n_way);
 
-        for (int j = ci->n_way-1; j >= 0; j--) {
+        // Initialize cache entries
+        for (int j = 0; j < ci->n_way; j++) {
             ci->set[i].ptr[j] = &ci->way[j].tbl[i];
             ci->set[i].ptr[j]->is_valid = false;
             ci->set[i].ptr[j]->lru_ptr =
@@ -110,50 +113,69 @@ static inline uint64_t get_tag(uint64_t addr) {
     return ( ( addr & cache.tag_mask ) >> ( 64 - cache.b_tag ) );
 }
 
+static void check_cache(struct cache_entry **target, struct cache_set *set, uint64_t tag, bool *is_hit, bool *is_full) {
+    struct cache_entry *iter;
+
+    // Check cache hit or miss
+    for (int i = cache.n_way-1; i >= 0; i--) {
+        iter = set->ptr[i];
+
+        if (!iter->is_valid) {
+            *is_full = false;
+            *target  = iter;
+            continue;
+        }
+
+        if (tag == iter->tag) {
+            *is_hit = true;
+            *target = iter;
+            break;
+        }
+    }
+}
+
+static void evict_victim(struct cache_entry **target, struct cache_set *set) {
+    *target = lru_get_victim(set->lru);
+    if ((*target)->is_dirty) {
+        ++cache.dirty_evict;
+
+        // Write-back
+        // target->data => memory
+    } else {
+        ++cache.clean_evict;
+    }
+}
+
+static void read_data(struct cache_entry **target, uint64_t tag) {
+    (*target)->tag      = tag;
+    (*target)->is_valid = true;
+    (*target)->is_dirty = false;
+
+    // (*target)->data <= memory
+}
+
 int cache_read(uint64_t addr) {
     struct cache_set *set;
     uint64_t tag;
 
-    struct cache_entry *iter;
     struct cache_entry *target;
 
-    bool is_hit = false;
-
-    ++cache.read_cnt;
+    bool is_hit  = false;
+    bool is_full = true;
 
     set = &cache.set[get_index(addr)];
     tag = get_tag(addr);
 
-    // Check cache hit or miss
-    for (int i = 0; i < N_WAY; i++) {
-        iter = set->ptr[i];
+    ++cache.read_cnt;
 
-        if ( iter->is_valid && (tag == iter->tag) ) {
-            is_hit = true;
-            target = iter;
-            break;
-        }
-    }
+    check_cache(&target, set, tag, &is_hit, &is_full);
 
     if (!is_hit) {
         ++cache.read_miss;
-
-        target = lru_get_victim(set->lru);
-        if (target->is_valid && target->is_dirty) {
-            ++cache.dirty_evict;
-
-            // Write-back
-            // target->data => memory
-        } else if (target->is_valid){
-            ++cache.clean_evict;
+        if (is_full) {
+            evict_victim(&target, set);
         }
-
-        // Read data
-        target->tag      = tag;
-        target->is_valid = true;
-        target->is_dirty = false;
-
-        // target->data <= memory
+        read_data(&target, tag);
     }
 
     // Update
@@ -166,45 +188,24 @@ int cache_write(uint64_t addr) {
     struct cache_set *set;
     uint64_t tag;
 
-    struct cache_entry *iter;
     struct cache_entry *target;
 
-    bool is_hit = false;
-
-    ++cache.write_cnt;
+    bool is_hit  = false;
+    bool is_full = true;
 
     set = &cache.set[get_index(addr)];
     tag = get_tag(addr);
 
-    // Check cache hit or miss
-    for (int i = 0; i < N_WAY; i++) {
-        iter = set->ptr[i];
+    ++cache.write_cnt;
 
-        if ( iter->is_valid && (tag == iter->tag) ) {
-            is_hit = true;
-            target = iter;
-            break;
-        }
-    }
+    check_cache(&target, set, tag, &is_hit, &is_full);
 
     if (!is_hit) {
         ++cache.write_miss;
-
-        target = lru_get_victim(set->lru);
-        if (target->is_valid && target->is_dirty) {
-            ++cache.dirty_evict;
-
-            // Write-back
-            // target->data => memory
-        } else if (target->is_valid) {
-            ++cache.clean_evict;
+        if (is_full) {
+            evict_victim(&target, set);
         }
-
-        // Read data
-        target->tag      = tag;
-        target->is_valid = true;
-
-        // target->data <= memory
+        read_data(&target, tag);
     }
 
     // Update

@@ -8,7 +8,6 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "./config.h"
 #include "./lru.h"
 
 
@@ -24,7 +23,7 @@ struct cache_entry {
     bool is_valid;
     bool is_dirty;
 
-    char data[BLOCK_SIZE];
+    //char data[BLOCK_SIZE];
 
     struct lru_node *lru_ptr;
 };
